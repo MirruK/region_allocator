@@ -33,6 +33,15 @@ void destroy_mem_regions(mem_regions *mem_regions);
 /* Print the contents of a mem_regions list (mainly for debugging purposes) */
 void print_regions(mem_regions *mem_regions);
 
+/* Allocate memory from a mem_region for use.
+  Returns: A pointer to the start of the allocated memory
+  or NULL if an error occurred. */
+void *region_alloc(mem_regions *regions, size_t nbytes);
+
+/* Split an existing range at nbytes, reassigning "next" property
+  so that the order of memory regions is preserved */
+void split_regions(region_range *matched_region, size_t nbytes);
+
 /* Append a region_range struct to the end of a mem_regions list */
 void add_region(region_range *region, mem_regions *regions);
 

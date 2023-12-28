@@ -1,7 +1,7 @@
 CC = clang
 CFLAGS = -Wall -Wextra -pedantic -g
 
-SRCS = main.c linkedlist.c
+SRCS = main.c mem_region.c
 OBJS = $(SRCS:.c=.o)
 TARGET = test_prog
 
