@@ -14,6 +14,7 @@ typedef struct region_range {
   void *end_addr;
   RegionType region_type;
   struct region_range *next;
+  struct region_range *prev;
 } region_range;
 
 /* A linked-list data structure to hold information about what parts of a chunk
@@ -23,11 +24,13 @@ typedef struct mem_regions {
   void *end_addr;
   size_t len;
   region_range *root;
+  region_range *head;
 } mem_regions;
 
 /* Initialize a mem_regions data structure */
 mem_regions *init_mem_regions(void *start_addr, void *end_addr);
 
+/* Free mem_region and all associated structs */
 void destroy_mem_regions(mem_regions *mem_regions);
 
 /* Print the contents of a mem_regions list (mainly for debugging purposes) */
@@ -35,12 +38,19 @@ void print_regions(mem_regions *mem_regions);
 
 /* Allocate memory from a mem_region for use.
   Returns: A pointer to the start of the allocated memory
-  or NULL if an error occurred. */
-void *region_alloc(mem_regions *regions, size_t nbytes);
+  or NULL if an error occurred.
+  The "match-type" given determines what algorithm is used.
+  0: first match.
+  default: next match*/
+void *region_alloc(mem_regions *regions, size_t nbytes, int match_type);
 
 /* Split an existing range at nbytes, reassigning "next" property
   so that the order of memory regions is preserved */
 void split_regions(region_range *matched_region, size_t nbytes);
+
+/* Mark "range_to_free" as unreserved.
+  If region is now adjacent to other unreserved regions, merge them */
+void region_free(mem_regions *regions, void *addr_to_free);
 
 /* Append a region_range struct to the end of a mem_regions list */
 void add_region(region_range *region, mem_regions *regions);
@@ -50,9 +60,8 @@ void add_region(region_range *region, mem_regions *regions);
 region_range *remove_region(mem_regions *regions,
                             region_range *region_to_remove);
 
-/* Find first region that matches (that returns EQ using cmp_region function)
- * from list */
-region_range *find_region(mem_regions *regions, region_range *region_to_find);
+/* Find region that has start_addr == addr_to_find */
+region_range *find_region(mem_regions *regions, void *addr_to_find);
 
 /* Get the nth region (or NULL if n > list length) in list */
 region_range *get_nth_region(mem_regions *regions, size_t n);
