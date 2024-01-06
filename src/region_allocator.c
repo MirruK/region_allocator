@@ -1,4 +1,4 @@
-#include "mem_region.h"
+#include "../include/region_allocator.h"
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -6,12 +6,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-mem_regions *init_mem_regions(void *start_addr, void *end_addr) {
+region_allocator *init_region_allocator(void *start_addr, void *end_addr) {
   uintptr_t region_size = (uintptr_t)end_addr - (uintptr_t)start_addr;
-  // Ensure the region of addresses will actually be usable by the process
+  // Malloc the actual memory block that will be used
   uintptr_t region = (uintptr_t)malloc(region_size);
-  mem_regions *regions_ls = malloc(sizeof(mem_regions));
-  region_range *root_region = malloc(sizeof(region_range));
+  region_allocator *regions_ls = malloc(sizeof(region_allocator));
+  memory_region *root_region = malloc(sizeof(memory_region));
   if ((void *)region == NULL) {
     perror("Error when allocating region of memory");
     return NULL;
@@ -30,8 +30,12 @@ mem_regions *init_mem_regions(void *start_addr, void *end_addr) {
   root_region->next = NULL;
   root_region->start_addr = actual_start_addr;
   root_region->end_addr = actual_end_addr;
-  region_range *first_region = malloc(sizeof(region_range));
-  memcpy(first_region, root_region, sizeof(region_range));
+  memory_region *first_region = malloc(sizeof(memory_region));
+  if (first_region == NULL) {
+    perror("malloc error: ");
+    return NULL;
+  }
+  memcpy(first_region, root_region, sizeof(memory_region));
   // root_region should never be modified and always come first
   // A copy of it is made and set to be the actual first allocatable region of
   // memory, first_region starts off by having no "next" region
@@ -46,32 +50,32 @@ mem_regions *init_mem_regions(void *start_addr, void *end_addr) {
   return regions_ls;
 }
 
-void destroy_mem_regions(mem_regions *regions) {
-  if (regions == NULL) {
+void destroy_region_allocator(region_allocator *allocator) {
+  if (allocator == NULL) {
     // No work to be done here
     return;
   }
-  region_range *curr = regions->root;
-  region_range *temp = curr;
-  // Free all region_range sturcts in linked list
+  memory_region *curr = allocator->root;
+  memory_region *temp = curr;
+  // Free all memory_region sturcts in linked list
   while (curr != NULL) {
     temp = curr;
     curr = curr->next;
     free(temp);
   }
   // Free the actual memory region
-  free(regions->start_addr);
-  free(regions);
+  free(allocator->start_addr);
+  free(allocator);
 }
 
-void print_regions(mem_regions *mem_regions) {
+void print_regions(region_allocator *allocator) {
   // Total size of memory
   size_t chunk_size =
-      (char *)mem_regions->end_addr - (char *)mem_regions->start_addr;
+      (char *)allocator->end_addr - (char *)allocator->start_addr;
   int print_width = 80;
   // How many bytes of actual memory will be represented by a single character
   int bytes_per_char = chunk_size / print_width;
-  region_range *curr = mem_regions->root;
+  memory_region *curr = allocator->root;
   char print_buff[print_width + 1];
   while ((curr = curr->next) != NULL) {
     size_t curr_chunk_size = (char *)curr->end_addr - (char *)curr->start_addr;
@@ -90,8 +94,8 @@ void print_regions(mem_regions *mem_regions) {
   printf("\n");
 }
 
-region_range *next_match(mem_regions *mem_regions, region_range *curr,
-                         size_t nbytes) {
+static memory_region *next_match(region_allocator *allocator,
+                                 memory_region *curr, size_t nbytes) {
   static int retries = 0;
   if (curr->region_type == UNRESERVED &&
       ((char *)curr->end_addr - (char *)curr->start_addr) >= (long)nbytes) {
@@ -102,20 +106,25 @@ region_range *next_match(mem_regions *mem_regions, region_range *curr,
   if (curr->next == NULL) {
     if (retries == 0) {
       // Defragment
-      //  defragment_regions(mem_region);
+      /* TODO: Uncomment this and test after implementing defragment function
+      defragment_region_allocator(region_allocator); */
       retries++;
-      next_match(mem_regions, mem_regions->root->next, nbytes);
+      next_match(allocator, allocator->root->next, nbytes);
     }
     // Defragmenting did not help, fail
     retries = 0;
     return NULL;
   }
-  return next_match(mem_regions, curr->next, nbytes);
+  return next_match(allocator, curr->next, nbytes);
 }
 
-void split_regions(region_range *reserved_region, size_t nbytes) {
-  region_range *unreserved_region = malloc(sizeof(region_range));
-  memcpy(unreserved_region, reserved_region, sizeof(region_range));
+static void split_regions(memory_region *reserved_region, size_t nbytes) {
+  memory_region *unreserved_region = malloc(sizeof(memory_region));
+  if (unreserved_region == NULL) {
+    perror("malloc error: ");
+    return;
+  }
+  memcpy(unreserved_region, reserved_region, sizeof(memory_region));
   // New range represents the new unreserved smaller portion of memory
   reserved_region->end_addr =
       (void *)((char *)reserved_region->start_addr + nbytes);
@@ -130,7 +139,7 @@ void split_regions(region_range *reserved_region, size_t nbytes) {
 }
 
 /* Helper function to merge region1 with a region on region1's right side. */
-void merge_regions(region_range *region1, region_range *region2) {
+static void merge_regions(memory_region *region1, memory_region *region2) {
   // Panic if function is called inappropriately (i.e. regions aren't both
   // unreserved)
   assert(region1->region_type == UNRESERVED);
@@ -141,14 +150,14 @@ void merge_regions(region_range *region1, region_range *region2) {
   region1->end_addr = region2->end_addr;
 }
 
-void *region_alloc(mem_regions *regions, size_t nbytes, int match_type) {
-  region_range *matched_region = NULL;
+void *region_alloc(region_allocator *allocator, size_t nbytes, int match_type) {
+  memory_region *matched_region = NULL;
   switch (match_type) {
   case 0:
-    matched_region = next_match(regions, regions->root->next, nbytes);
+    matched_region = next_match(allocator, allocator->root->next, nbytes);
     break;
   default:
-    matched_region = next_match(regions, regions->head, nbytes);
+    matched_region = next_match(allocator, allocator->head, nbytes);
     break;
   }
   /* First match allocation */
@@ -159,8 +168,8 @@ void *region_alloc(mem_regions *regions, size_t nbytes, int match_type) {
          (char *)matched_region->start_addr) > (long)nbytes) {
       split_regions(matched_region, nbytes);
       // Increment length of regions linked list
-      regions->len++;
-      regions->head = matched_region->next;
+      allocator->len++;
+      allocator->head = matched_region->next;
     }
     matched_region->region_type = RESERVED;
     return matched_region->start_addr;
@@ -168,8 +177,13 @@ void *region_alloc(mem_regions *regions, size_t nbytes, int match_type) {
   return NULL;
 }
 
-region_range *find_region(mem_regions *regions, void *addr_to_find) {
-  region_range *curr = regions->root->next;
+static void defragment_region_allocator(void) __attribute__((unused));
+static void defragment_region_allocator(void) { /* TODO: IMPLEMENT HOW? */
+}
+
+static memory_region *find_region(region_allocator *allocator,
+                                  void *addr_to_find) {
+  memory_region *curr = allocator->root->next;
   while (curr->next != NULL) {
     if (curr->start_addr == addr_to_find) {
       return curr;
@@ -179,8 +193,8 @@ region_range *find_region(mem_regions *regions, void *addr_to_find) {
   return NULL;
 }
 
-void region_free(mem_regions *regions, void *addr_to_free) {
-  region_range *region_to_free = find_region(regions, addr_to_free);
+void region_free(region_allocator *allocator, void *addr_to_free) {
+  memory_region *region_to_free = find_region(allocator, addr_to_free);
   if (region_to_free == NULL) {
     printf("No region matching address provided was found, no memory will be "
            "freed.\nFree that address at your own risk.");

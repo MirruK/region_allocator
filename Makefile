@@ -1,18 +1,25 @@
 CC = clang
 CFLAGS = -Wall -Wextra -pedantic -g
+SRC_DIR = src
+BUILD_DIR = build
 
-SRCS = main.c mem_region.c
-OBJS = $(SRCS:.c=.o)
-TARGET = test_prog
+SRCS = $(wildcard $(SRC_DIR)/*.c)
+OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
+TARGET = $(BUILD_DIR)/test_prog
 
 all: $(TARGET)
 
-$(TARGET): $(OBJS)
+$(TARGET): $(OBJS) | $(BUILD_DIR)
 	$(CC) $(OBJS) -o $(TARGET)
 
-%.o: %.c
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-clean:
-	rm -f $(OBJS) $(TARGET)
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
 
+run: $(TARGET)
+	./$(TARGET)
+
+clean:
+	rm -rf $(BUILD_DIR)
